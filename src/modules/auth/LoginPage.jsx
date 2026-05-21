@@ -15,7 +15,7 @@ export default function LoginPage({ onLoginSuccess }) {
     setError("");
 
     try {
-      const res = await fetch("https://neurava-backend-fw32.onrender.com", {
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
