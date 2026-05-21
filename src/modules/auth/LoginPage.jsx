@@ -15,6 +15,7 @@ export default function LoginPage({ onLoginSuccess }) {
     setError("");
 
     try {
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://neurava-backend-fw32.onrender.com";
       const res = await fetch(`${API_BASE_URL}/api/auth/login`), {
         method: "POST",
         headers: {
