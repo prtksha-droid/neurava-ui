@@ -305,7 +305,13 @@ const filteredEvents = dpdpEvents.filter((event) => {
               Latest DPDP Event
             </h3>
 
-            <Badge>{latestEvent.eventType}</Badge>
+            <Badge>
+  {latestEvent.source === "DATA_MINIMIZATION"
+    ? "DATA_MINIMIZATION_CHECK"
+    : latestEvent.source === "CROSS_BORDER_TRANSFER"
+    ? "CROSS_BORDER_TRANSFER"
+    : latestEvent.eventType}
+</Badge>
           </div>
 
           <div className="mt-5 grid gap-4 xl:grid-cols-2">
@@ -326,8 +332,14 @@ const filteredEvents = dpdpEvents.filter((event) => {
               </p>
 
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6">
-                {latestEvent.responseSnippet ||
-                  "No response snippet"}
+                {latestEvent.source === "CROSS_BORDER_TRANSFER"
+  ? `Transfer destination: ${
+      latestEvent.metadata?.destinationCountry || "Unknown"
+    }. ${latestEvent.metadata?.recommendation || ""}`
+  : latestEvent.source === "CHILD_DATA_PROCESSING"
+  ? latestEvent.metadata?.recommendation ||
+    "Parental consent required for child data processing."
+  : latestEvent.responseSnippet || "No response snippet"}
               </p>
             </div>
 
@@ -510,8 +522,12 @@ const filteredEvents = dpdpEvents.filter((event) => {
   className="cursor-pointer border-b transition hover:bg-slate-50 last:border-b-0"
 >
                     <td className="py-3 pr-4 font-semibold">
-                      {event.eventType}
-                    </td>
+  {event.source === "DATA_MINIMIZATION"
+  ? "DATA_MINIMIZATION_CHECK"
+  : event.source === "CROSS_BORDER_TRANSFER"
+  ? "CROSS_BORDER_TRANSFER"
+  : event.eventType}
+</td>
 
                     <td className="py-3 pr-4">
                       <Badge>{event.severity}</Badge>
@@ -573,7 +589,11 @@ const filteredEvents = dpdpEvents.filter((event) => {
           </h2>
 
           <p className="mt-1 text-sm text-slate-500">
-            {selectedEvent.eventType}
+            {selectedEvent.source === "DATA_MINIMIZATION"
+  ? "DATA_MINIMIZATION_CHECK"
+  : selectedEvent.source === "CROSS_BORDER_TRANSFER"
+  ? "CROSS_BORDER_TRANSFER"
+  : selectedEvent.eventType}
           </p>
         </div>
 
@@ -603,7 +623,14 @@ const filteredEvents = dpdpEvents.filter((event) => {
           </p>
 
           <p className="mt-2 whitespace-pre-wrap text-sm leading-6">
-            {selectedEvent.responseSnippet || "N/A"}
+            {selectedEvent.source === "CROSS_BORDER_TRANSFER"
+  ? `Transfer destination: ${
+      selectedEvent.metadata?.destinationCountry || "Unknown"
+    }. ${selectedEvent.metadata?.recommendation || ""}`
+  : selectedEvent.source === "CHILD_DATA_PROCESSING"
+  ? selectedEvent.metadata?.recommendation ||
+    "Parental consent required for child data processing."
+  : selectedEvent.responseSnippet || "N/A"}
           </p>
         </div>
 

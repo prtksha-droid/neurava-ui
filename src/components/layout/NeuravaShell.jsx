@@ -59,6 +59,9 @@ export default function NeuravaShell({
     { label: "Data Subject Rights", key: "data-subject-rights", icon: UserCheck },
     { label: "Retention Policies", key: "retention-policies", icon: Clock },
     { label: "Breach Management", key: "breach-management", icon: AlertTriangle },
+    { label: "Privacy Notices", key: "privacy-notices", icon: FileText },
+    { label: "Vendor Governance", key: "vendor-processors", icon: Plug },
+    { label: "DPO Workspace", key: "dpo-workspace", icon: UserCheck },
   ];
 
   const operationsMenu = [

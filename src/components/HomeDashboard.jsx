@@ -54,6 +54,8 @@ export default function HomeDashboard({
 }) {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [dpdpEvents, setDpdpEvents] = useState([]);
+    const [dpdpComplianceSummary, setDpdpComplianceSummary] = useState(null);
+    const [showDpdpDetails, setShowDpdpDetails] = useState(false);
   const safeLogs = Array.isArray(logs) ? logs : [];
   const safePolicies = Array.isArray(policies) ? policies : [];
   useEffect(() => {
@@ -80,6 +82,20 @@ export default function HomeDashboard({
       if (response.ok) {
         setDpdpEvents(Array.isArray(data) ? data : []);
       }
+      const complianceRes = await fetch(
+  "http://localhost:5000/api/dpdp-compliance/summary",
+  {
+    headers: {
+      Authorization: token ? `Bearer ${token}` : "",
+    },
+  }
+);
+
+const complianceData = await complianceRes.json();
+
+if (complianceRes.ok) {
+  setDpdpComplianceSummary(complianceData);
+}
     } catch (err) {
       console.error("Failed to fetch DPDP dashboard events:", err);
     }
@@ -227,104 +243,23 @@ const openDpdpIncidents = dpdpEvents.filter(
 const providerFailures = dpdpEvents.filter(
   (event) => event.source === "AI_CHAT_ERROR"
 ).length;
+const dpdpScore =
+  dpdpComplianceSummary?.score ??
+  Math.max(
+    0,
+    100 -
+      consentViolations * 15 -
+      criticalDpdpEvents * 15 -
+      openDpdpIncidents * 5 -
+      providerFailures * 5
+  );
 
-const dpdpScore = Math.max(
-  0,
-  100 -
-    consentViolations * 15 -
-    criticalDpdpEvents * 15 -
-    openDpdpIncidents * 5 -
-    providerFailures * 5
-);
-
-const dpdpChecks = [
-  {
-    name: "Consent Management",
-    compliant: consentAcceptedRate >= 80,
-    value: `${consentAcceptedRate}% accepted`,
-  },
-  {
-    name: "Data Security",
-    compliant: safePolicies.length > 0,
-    value: `${safePolicies.length} policies`,
-  },
-  {
-    name: "PII Monitoring",
-    compliant: piiDetections === 0,
-    value: `${piiDetections} detections`,
-  },
-  {
-    name: "Consent Violations",
-    compliant: consentViolations === 0,
-    value: `${consentViolations} violations`,
-  },
-  {
-    name: "Open Incidents",
-    compliant: openDpdpIncidents === 0,
-    value: `${openDpdpIncidents} open`,
-  },
-  {
-    name: "Provider Failures",
-    compliant: providerFailures === 0,
-    value: `${providerFailures} failures`,
-  },
-];
-  const topCards = [
-    {
-      title: "AI Systems",
-      value: activePolicyCount || 0,
-      icon: Box,
-      color: "text-blue-600",
-      bg: "bg-blue-50",
-      sub: "Active",
-      change: "↑ 4 vs last 7 days",
-    },
-    {
-      title: "Total AI Responses",
-      value: totalResponses.toLocaleString(),
-      icon: MessageSquare,
-      color: "text-violet-600",
-      bg: "bg-violet-50",
-      sub: "From MongoDB logs",
-      change: "↑ 18.6% vs last 7 days",
-    },
-    {
-      title: "Hallucination Rate",
-      value: `${hallucinationRate}%`,
-      icon: AlertTriangle,
-      color: "text-red-500",
-      bg: "bg-red-50",
-      sub: "Detected from audit logs",
-      change: "↓ 8.7% vs last 7 days",
-    },
-    {
-      title: "Policy Violations",
-      value: violationCount,
-      icon: Shield,
-      color: "text-orange-500",
-      bg: "bg-orange-50",
-      sub: `${blockedCount} blocked responses`,
-      change: "↓ 31.3% vs last 7 days",
-    },
-    {
-      title: "Confidence Score (Avg.)",
-      value: confidenceScore,
-      icon: Activity,
-      color: "text-green-600",
-      bg: "bg-green-50",
-      sub: `Avg risk ${avgRisk}%`,
-      change: "↑ 6.4% vs last 7 days",
-    },
-    {
-      title: "DPDP Compliance",
-      value: `${dpdpScore}%`,
-sub: dpdpScore >= 80 ? "Compliant" : "Needs Review",
-progress: dpdpScore,
-      icon: Lock,
-      color: "text-blue-600",
-      bg: "bg-blue-50",
-          },
-  ];
+const dpdpChecks =
+  dpdpComplianceSummary?.controls?.map((control) => ({
+    name: control.section,
+    compliant: control.status === "IMPLEMENTED",
+    value: control.neuravaModule,
+  })) || [];
 
   const trustLayerItems = [
     {
@@ -432,7 +367,65 @@ const operationsMenu = [
   { label: "Integrations", key: "integrations", icon: Plug },
   { label: "Reports", key: "reports", icon: FileText },
 ];
-  return (
+
+const topCards = [
+  {
+    title: "AI Systems",
+    value: activePolicyCount || 0,
+    icon: Box,
+    color: "text-blue-600",
+    bg: "bg-blue-50",
+    sub: "Active",
+    change: "↑ 4 vs last 7 days",
+  },
+  {
+    title: "Total AI Responses",
+    value: totalResponses.toLocaleString(),
+    icon: MessageSquare,
+    color: "text-violet-600",
+    bg: "bg-violet-50",
+    sub: "From MongoDB logs",
+    change: "↑ 18.6% vs last 7 days",
+  },
+  {
+    title: "Hallucination Rate",
+    value: `${hallucinationRate}%`,
+    icon: AlertTriangle,
+    color: "text-red-500",
+    bg: "bg-red-50",
+    sub: "Detected from audit logs",
+    change: "↓ 8.7% vs last 7 days",
+  },
+  {
+    title: "Policy Violations",
+    value: violationCount,
+    icon: Shield,
+    color: "text-orange-500",
+    bg: "bg-orange-50",
+    sub: `${blockedCount} blocked responses`,
+    change: "↓ 31.3% vs last 7 days",
+  },
+  {
+    title: "Confidence Score (Avg.)",
+    value: confidenceScore,
+    icon: Activity,
+    color: "text-green-600",
+    bg: "bg-green-50",
+    sub: `Avg risk ${avgRisk}%`,
+    change: "↑ 6.4% vs last 7 days",
+  },
+  {
+    title: "DPDP Compliance",
+    value: `${dpdpScore}%`,
+    icon: Lock,
+    color: "text-blue-600",
+    bg: "bg-blue-50",
+    sub: dpdpScore >= 80 ? "Compliant" : "Needs Review",
+    progress: dpdpScore,
+  },
+];
+
+return (
     <div className="min-h-screen bg-[#f7f9ff] text-[#071143]">
       <div className="flex min-h-screen">
         <aside
@@ -906,9 +899,12 @@ const operationsMenu = [
                   <h3 className="text-lg font-bold text-[#071143]">
                     DPDP Compliance Summary
                   </h3>
-                  <button className="text-xs font-semibold text-violet-700">
-                    View details →
-                  </button>
+                  <button
+  onClick={() => setShowDpdpDetails(true)}
+  className="text-xs font-semibold text-violet-700"
+>
+  View details →
+</button>
                 </div>
 
                 <div className="mt-4 grid grid-cols-[130px_1fr] items-center gap-5">
@@ -922,28 +918,40 @@ const operationsMenu = [
                   </div>
 
                   <div className="space-y-3">
-                    {dpdpChecks.map((item) => (
+
+  {dpdpChecks.slice(0, 7).map((item) => (
   <div
     key={item.name}
-    className="flex items-center justify-between gap-3 text-sm"
+    className="grid grid-cols-[1fr_105px] items-start gap-2 text-sm"
   >
-    <span>
-  {item.compliant ? "✓" : "!"} {item.name}
-  <span className="ml-1 text-xs text-slate-400">
-    ({item.value})
-  </span>
-</span>
+    <div className="leading-5">
+      <span>
+        {item.compliant ? "✓" : "!"} {item.name}
+      </span>
 
-    <span
-      className={`whitespace-nowrap ${
+      <div className="text-xs text-slate-400">
+        {item.value}
+      </div>
+    </div>
+
+    <div
+      className={`text-right text-xs ${
         item.compliant ? "text-green-600" : "text-orange-600"
       }`}
     >
       {item.compliant ? "Compliant" : "Action Required"}
-    </span>
+    </div>
   </div>
 ))}
-                  </div>
+
+  {dpdpChecks.length > 7 && (
+    <p className="pt-2 text-xs text-slate-500">
+      +{dpdpChecks.length - 7} more DPDP Act controls.
+      Click View details.
+    </p>
+  )}
+
+</div>
                 </div>
               </div>
 
@@ -1025,6 +1033,70 @@ const operationsMenu = [
       <button className="fixed bottom-8 right-8 flex h-16 w-16 items-center justify-center rounded-full bg-violet-700 text-white shadow-2xl shadow-violet-300">
         <MessageSquare size={28} />
       </button>
+      {showDpdpDetails && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
+    <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-black">DPDP Act Coverage Details</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Neurava module mapping against DPDP Act controls.
+          </p>
+        </div>
+
+        <button
+          onClick={() => setShowDpdpDetails(false)}
+          className="rounded-xl border px-4 py-2 text-sm hover:bg-slate-100"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="mt-6 overflow-x-auto">
+        <table className="w-full min-w-[900px] text-left text-sm">
+          <thead>
+            <tr className="border-b text-xs uppercase text-slate-500">
+              <th className="py-3 pr-4">DPDP Control</th>
+              <th className="py-3 pr-4">Requirement</th>
+              <th className="py-3 pr-4">Neurava Module</th>
+              <th className="py-3 pr-4">Status</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {(dpdpComplianceSummary?.controls || []).map((control) => (
+              <tr key={control.id} className="border-b">
+                <td className="py-3 pr-4 font-semibold">
+                  {control.section}
+                </td>
+
+                <td className="py-3 pr-4 text-slate-600">
+                  {control.requirement}
+                </td>
+
+                <td className="py-3 pr-4">
+                  {control.neuravaModule}
+                </td>
+
+                <td className="py-3 pr-4">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      control.status === "IMPLEMENTED"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-orange-100 text-orange-700"
+                    }`}
+                  >
+                    {control.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }

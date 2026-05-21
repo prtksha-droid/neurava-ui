@@ -7,107 +7,205 @@ import { extractClaims } from "../services/claimExtractor.js";
 import { retrieveEvidence } from "../services/evidenceRetriever.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
 import { createDpdpObservabilityEvent } from "../services/dpdpObservabilityService.js";
+import { analyzeDataMinimization } from "../services/dataMinimization.service.js";
+import { maskSensitiveData } from "../services/dataMasking.service.js";
+import { analyzeCrossBorderTransfer } from "../services/crossBorderTransfer.service.js";
+import { analyzeChildData } from "../services/childDataProtection.service.js";
 
 const router = express.Router();
 
+const normalizeProvider = (provider = "") => {
+  const cleanProvider = String(provider).toUpperCase();
+
+  if (["OPENAI", "CLAUDE", "GEMINI"].includes(cleanProvider)) {
+    return cleanProvider;
+  }
+
+  return "OPENAI";
+};
+
+const normalizeModel = (provider, model = "") => {
+  if (!model || model === "model") {
+    if (provider === "OPENAI") return "gpt-4.1-mini";
+    if (provider === "CLAUDE") return "claude-3-5-sonnet-latest";
+    if (provider === "GEMINI") return "gemini-1.5-flash";
+    return "gpt-4.1-mini";
+  }
+
+  return model;
+};
+
+const callGemini = async ({ apiKey, model, prompt }) => {
+  const geminiModel = normalizeModel("GEMINI", model);
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+      }),
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message || "Gemini request failed"
+    );
+  }
+
+  return (
+    data?.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text)
+      .join("\n") || ""
+  );
+};
+
 export default function createChatRoutes({ openai, decryptApiKey }) {
   router.post("/", requireAuth, async (req, res) => {
-   
-
     let provider = "UNKNOWN";
-let finalModel = "unknown-model";
-  try {
-    const {
-      prompt,
-      mode = "safe",
-      model = "",
-      policies = [],
-      consentAccepted = false,
-      selectedLlmId,
-      consentVersion = "v1.0",
-      consentPurpose =
-        "AI safety, security monitoring, governance, compliance, and audit logging",
-    } = req.body;
+    let finalModel = "unknown-model";
 
-    if (!consentAccepted) {
-      return res.status(403).json({
-        error: "Consent required",
+    try {
+      const {
+        prompt,
+        mode = "safe",
+        model = "",
+        policies = [],
+        consentAccepted = false,
+        selectedLlmId,
+        consentVersion = "v1.0",
+        consentPurpose =
+          "AI safety, security monitoring, governance, compliance, and audit logging",
+      } = req.body;
+
+      if (!consentAccepted) {
+        return res.status(403).json({
+          error: "Consent required",
+        });
+      }
+
+      let selectedLlm = null;
+
+      if (selectedLlmId) {
+        selectedLlm = await LLMProvider.findOne({
+          _id: selectedLlmId,
+          isActive: true,
+        });
+      }
+
+      provider = normalizeProvider(selectedLlm?.provider || "OPENAI");
+
+      finalModel = normalizeModel(
+        provider,
+        selectedLlm?.model || model
+      );
+
+      console.log("Using Provider:", provider);
+      console.log("Using Model:", finalModel);
+
+      const validationPrimary = await openai.chat.completions.create({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: prompt }],
       });
-    }
 
-   
-const primary = await openai.chat.completions.create({
-  model: model && model !== "model" ? model : "gpt-4.1-mini",
-  messages: [{ role: "user", content: prompt }],
-});
+      const rawOutput =
+        validationPrimary.choices[0].message.content;
 
-    const rawOutput = primary.choices[0].message.content;
+      const claims = await extractClaims(rawOutput);
 
-    const claims = await extractClaims(rawOutput);
-    const evidenceResults = await Promise.all(
-  claims.map(async (claim) => ({
-    ...claim,
-    evidence: await retrieveEvidence(claim),
-  }))
-);
+      const evidenceResults = await Promise.all(
+        claims.map(async (claim) => ({
+          ...claim,
+          evidence: await retrieveEvidence(claim),
+        }))
+      );
 
-const dynamicPoliciesText = policies
-  .map((policy, index) => `${index + 1}. ${policy}`)
-  .join("\n");
-  
-const runtimeTriggeredPolicies = [];
+      const dynamicPoliciesText = policies
+        .map((policy, index) => `${index + 1}. ${policy}`)
+        .join("\n");
 
-const lowerPrompt = prompt.toLowerCase();
+      const runtimeTriggeredPolicies = [];
 
-policies.forEach((policy) => {
-  const lowerPolicy = policy.toLowerCase();
+      const minimizationResult = analyzeDataMinimization({
+        prompt,
+        purpose: "SUPPORT",
+      });
+      const transferResult =
+  analyzeCrossBorderTransfer(provider);
 
-  // Animal policy
-  if (
-    lowerPolicy.includes("animal") &&
-    (
-      lowerPrompt.includes("cat") ||
-      lowerPrompt.includes("dog") ||
-      lowerPrompt.includes("lion") ||
-      lowerPrompt.includes("tiger") ||
-      lowerPrompt.includes("animal")
-    )
-  ) {
-    runtimeTriggeredPolicies.push(policy);
-  }
+if (transferResult.restricted) {
+  runtimeTriggeredPolicies.push(
+    "Restricted cross-border transfer"
+  );
+}
+const childProtectionResult =
+  analyzeChildData(prompt);
 
-  // Financial policy
-  if (
-    lowerPolicy.includes("financial") &&
-    (
-      lowerPrompt.includes("stock") ||
-      lowerPrompt.includes("investment") ||
-      lowerPrompt.includes("crypto") ||
-      lowerPrompt.includes("trading")
-    )
-  ) {
-    runtimeTriggeredPolicies.push(policy);
-  }
+if (childProtectionResult.childDataDetected) {
+  runtimeTriggeredPolicies.push(
+    "Child data protection required"
+  );
+}
 
-  // Medical policy
-  if (
-    lowerPolicy.includes("medical") &&
-    (
-      lowerPrompt.includes("disease") ||
-      lowerPrompt.includes("medicine") ||
-      lowerPrompt.includes("treatment")
-    )
-  ) {
-    runtimeTriggeredPolicies.push(policy);
-  }
-});
+      if (minimizationResult.excessive) {
+        runtimeTriggeredPolicies.push(
+          "Data minimization violation"
+        );
+      }
 
-    const validation = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages: [
-        {
-          role: "system",
-          content: `
+      const lowerPrompt = prompt.toLowerCase();
+
+      policies.forEach((policy) => {
+        const lowerPolicy = policy.toLowerCase();
+
+        if (
+          lowerPolicy.includes("animal") &&
+          (lowerPrompt.includes("cat") ||
+            lowerPrompt.includes("dog") ||
+            lowerPrompt.includes("lion") ||
+            lowerPrompt.includes("tiger") ||
+            lowerPrompt.includes("animal"))
+        ) {
+          runtimeTriggeredPolicies.push(policy);
+        }
+
+        if (
+          lowerPolicy.includes("financial") &&
+          (lowerPrompt.includes("stock") ||
+            lowerPrompt.includes("investment") ||
+            lowerPrompt.includes("crypto") ||
+            lowerPrompt.includes("trading"))
+        ) {
+          runtimeTriggeredPolicies.push(policy);
+        }
+
+        if (
+          lowerPolicy.includes("medical") &&
+          (lowerPrompt.includes("disease") ||
+            lowerPrompt.includes("medicine") ||
+            lowerPrompt.includes("treatment"))
+        ) {
+          runtimeTriggeredPolicies.push(policy);
+        }
+      });
+
+      const validation = await openai.chat.completions.create({
+        model: "gpt-4.1-mini",
+        messages: [
+          {
+            role: "system",
+            content: `
 You are an enterprise AI security validation engine.
 
 Analyze the AI response for:
@@ -142,8 +240,8 @@ Policy mapping rules:
 
 4. If sensitive/private/security information appears:
    trigger "Prevent sensitive data leakage"
-   
-   5. If the response involves harmful, violent, or unsafe content:
+
+5. If the response involves harmful, violent, or unsafe content:
    trigger "Detect harmful content"
 
 6. If the response involves terrorism, extremism, radicalization, or violent ideology:
@@ -164,11 +262,11 @@ Rules:
 - If response is safe, return []
 - safeResponse should contain corrected safer output
 - Return ONLY JSON
-`
-        },
-        {
-          role: "user",
-          content: `
+`,
+          },
+          {
+            role: "user",
+            content: `
 Prompt:
 ${prompt}
 
@@ -178,278 +276,369 @@ ${rawOutput}
 Dynamic Policies:
 ${dynamicPoliciesText}
 `,
+          },
+        ],
+      });
+
+      let parsed;
+
+      try {
+        parsed = JSON.parse(validation.choices[0].message.content);
+      } catch {
+        parsed = {
+          riskScore: 50,
+          decision: "ALLOW",
+          safeResponse: rawOutput,
+          triggeredPolicies: [],
+        };
+      }
+
+      let finalOutput = rawOutput;
+
+      if (provider === "CLAUDE") {
+        if (!selectedLlm?.apiKeyEncrypted) {
+          throw new Error("Claude API key is missing.");
+        }
+
+        const anthropic = new Anthropic({
+          apiKey: decryptApiKey(selectedLlm.apiKeyEncrypted),
+        });
+
+        const response = await anthropic.messages.create({
+          model: finalModel,
+          max_tokens: 1024,
+          messages: [
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        });
+
+        finalOutput = response.content[0].text;
+      } else if (provider === "GEMINI") {
+        if (!selectedLlm?.apiKeyEncrypted) {
+          throw new Error("Gemini API key is missing.");
+        }
+
+        finalOutput = await callGemini({
+          apiKey: decryptApiKey(selectedLlm.apiKeyEncrypted),
+          model: finalModel,
+          prompt,
+        });
+      } else {
+        const dynamicOpenAI = new OpenAI({
+          apiKey: selectedLlm?.apiKeyEncrypted
+            ? decryptApiKey(selectedLlm.apiKeyEncrypted)
+            : process.env.OPENAI_API_KEY,
+        });
+
+        const response = await dynamicOpenAI.chat.completions.create({
+          model: finalModel,
+          messages: [
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        });
+
+        finalOutput = response.choices[0].message.content;
+      }
+
+      let finalDecision = parsed.decision;
+
+      if (runtimeTriggeredPolicies.length > 0) {
+        parsed.triggeredPolicies = [
+          ...(parsed.triggeredPolicies || []),
+          ...runtimeTriggeredPolicies,
+        ];
+
+        parsed.riskScore = Math.max(parsed.riskScore || 0, 85);
+
+        if (mode === "safe" || mode === "strict") {
+          finalDecision = "BLOCK";
+          finalOutput =
+            "Response blocked by Neurava policy enforcement engine.";
+        }
+      }
+
+      if (mode === "monitor") {
+        finalDecision = "ALLOW";
+        finalOutput = rawOutput;
+      }
+
+      if (
+        mode === "safe" &&
+        parsed.riskScore >= 70 &&
+        runtimeTriggeredPolicies.length === 0
+      ) {
+        finalDecision = "REWRITE";
+        finalOutput = parsed.safeResponse || rawOutput;
+      }
+
+      if (mode === "strict" && parsed.riskScore >= 70) {
+        finalDecision = "BLOCK";
+        finalOutput =
+          "Response blocked by Neurava Strict Mode due to high risk.";
+      }
+
+      const timeline = [
+        {
+          step: "User Prompt",
+          status: "completed",
+          output: prompt,
         },
-      ],
-    });
+        {
+          step: "Primary LLM",
+          status: "completed",
+          output: rawOutput,
+        },
+        {
+          step: "Claim Extraction",
+          status: "completed",
+          output: `${claims.length} factual claims extracted`,
+        },
+        {
+          step: "Validation Engine",
+          status: "completed",
+          output: `Risk Score: ${parsed.riskScore}`,
+        },
+        {
+          step: "Decision Engine",
+          status: "completed",
+          output: finalDecision,
+        },
+        {
+          step: "Final Output",
+          status: "completed",
+          output: finalOutput,
+        },
+      ];
 
-    let parsed;
+      const savedLog = await RequestLog.create({
+        prompt: maskSensitiveData(prompt),
+rawOutput: maskSensitiveData(rawOutput),
+finalOutput: maskSensitiveData(finalOutput),
+        decision: finalDecision,
+        riskScore: parsed.riskScore,
+        userId: req.user.id,
+        userEmail: req.user.email,
+        userRole: req.user.role,
+        mode,
+        primaryModel: finalModel,
+        validatorModel: "gpt-4.1-mini",
+        policies,
+        triggeredPolicies: [
+          ...new Set(parsed.triggeredPolicies || []),
+        ],
+        consentAccepted,
+        evidenceResults,
+        consentVersion,
+        consentPurpose,
+        timeline,
+        claims,
+      });
 
-    try {
-      parsed = JSON.parse(validation.choices[0].message.content);
-    } catch {
-      parsed = {
-        riskScore: 50,
-        decision: "ALLOW",
-        safeResponse: rawOutput,
-        triggeredPolicies: [],
-      };
-    }
+      try {
+        await createDpdpObservabilityEvent({
+          eventType: "DATA_SECURITY_EVENT",
+          prompt: maskSensitiveData(prompt),
+          response: maskSensitiveData(
+  finalOutput || rawOutput || ""
+),
+          modelName: finalModel,
+          userId: req.user?.id || "anonymous",
+          consentStatus: consentAccepted ? "VALID" : "MISSING",
+          source: "AI_CHAT",
+          metadata: {
+            route: "/api/chat",
+            requestLogId: savedLog._id.toString(),
+            provider,
+            mode,
+            decision: finalDecision,
+            riskScore: parsed.riskScore,
+            triggeredPolicies: parsed.triggeredPolicies || [],
+            consentVersion,
+            consentPurpose,
+          },
+        });
+      } catch (dpdpObsError) {
+        console.error(
+          "DPDP observability logging failed:",
+          dpdpObsError.message
+        );
+      }
 
-    const selectedLlm = selectedLlmId
-  ? await LLMProvider.findById(selectedLlmId)
-  : null;
-
-provider = selectedLlm?.provider || "OPENAI";
-
-finalModel =
-  selectedLlm?.model ||
-  (model && model !== "model"
-    ? model
-    : "gpt-4.1-mini");
-
-console.log("Using Provider:", provider);
-console.log("Using Model:", finalModel);
-
-let finalOutput = rawOutput;
-
-if (provider === "CLAUDE") {
-  const anthropic = new Anthropic({
-    apiKey: decryptApiKey(selectedLlm.apiKeyEncrypted),
-  });
-
-  const response = await anthropic.messages.create({
-    model: finalModel,
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-  });
-
-  finalOutput = response.content[0].text;
-} else {
-  const dynamicOpenAI = new OpenAI({
-    apiKey: selectedLlm?.apiKeyEncrypted
-      ? decryptApiKey(selectedLlm.apiKeyEncrypted)
-      : process.env.OPENAI_API_KEY,
-  });
-
-  const response = await dynamicOpenAI.chat.completions.create({
-    model: finalModel,
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-  });
-
-  finalOutput = response.choices[0].message.content;
-}
-    let finalDecision = parsed.decision;
-    
-    if (runtimeTriggeredPolicies.length > 0) {
-  parsed.triggeredPolicies = [
-    ...(parsed.triggeredPolicies || []),
-    ...runtimeTriggeredPolicies,
-  ];
-
-  parsed.riskScore = Math.max(parsed.riskScore || 0, 85);
-
-  if (mode === "safe" || mode === "strict") {
-    finalDecision = "BLOCK";
-    finalOutput =
-      "Response blocked by Neurava policy enforcement engine.";
-  }
-}
-
-    if (mode === "monitor") {
-      finalDecision = "ALLOW";
-      finalOutput = rawOutput;
-    }
-
-    if (
-  mode === "safe" &&
-  parsed.riskScore >= 70 &&
-  runtimeTriggeredPolicies.length === 0
-) {
-  finalDecision = "REWRITE";
-  finalOutput = parsed.safeResponse || rawOutput;
-}
-
-    if (mode === "strict" && parsed.riskScore >= 70) {
-      finalDecision = "BLOCK";
-      finalOutput =
-        "Response blocked by Neurava Strict Mode due to high risk.";
-    }
-
-    const timeline = [
-      {
-        step: "User Prompt",
-        status: "completed",
-        output: prompt,
-      },
-      {
-        step: "Primary LLM",
-        status: "completed",
-        output: rawOutput,
-      },
-      {
-        step: "Claim Extraction",
-        status: "completed",
-        output: `${claims.length} factual claims extracted`,
-      },
-      {
-        step: "Validation Engine",
-        status: "completed",
-        output: `Risk Score: ${parsed.riskScore}`,
-      },
-      {
-        step: "Decision Engine",
-        status: "completed",
-        output: finalDecision,
-      },
-      {
-        step: "Final Output",
-        status: "completed",
-        output: finalOutput,
-      },
-    ];
-
-    const savedLog = await RequestLog.create({
-      prompt,
-      rawOutput,
-      finalOutput,
-      decision: finalDecision,
-      riskScore: parsed.riskScore,
-      userId: req.user.id,
-      userEmail: req.user.email,
-      userRole: req.user.role,
-      mode,
-     primaryModel: finalModel,
-      validatorModel: "gpt-4.1-mini",
-      policies,
-      triggeredPolicies: [
-  ...new Set(parsed.triggeredPolicies || []),
-],
-      consentAccepted,
-      evidenceResults,
-      consentVersion,
-      consentPurpose,
-      timeline,
-      claims,
-    });
-    
-    try {
+      if (minimizationResult.detected.length) {
+        try {
+          await createDpdpObservabilityEvent({
+            prompt: maskSensitiveData(prompt),
+            response: "",
+            modelName: finalModel,
+            userId: req.user?.id || "anonymous",
+            consentStatus: consentAccepted ? "VALID" : "MISSING",
+            source: "DATA_MINIMIZATION",
+            metadata: {
+              excessive: minimizationResult.excessive,
+              riskScore: minimizationResult.riskScore,
+              detectedData: minimizationResult.detected,
+              recommendation: minimizationResult.recommendation,
+              purpose: "SUPPORT",
+            },
+          });
+        } catch (minErr) {
+          console.error(
+            "Minimization event failed:",
+            minErr.message
+          );
+        }
+      }
+      try {
   await createDpdpObservabilityEvent({
-    prompt,
-    response: finalOutput || rawOutput || "",
-    modelName: finalModel,
-    userId: req.user?.id || "anonymous",
-    consentStatus: consentAccepted ? "VALID" : "MISSING",
-    source: "AI_CHAT",
-    metadata: {
-      route: "/api/chat",
-      requestLogId: savedLog._id.toString(),
-      provider,
-      mode,
-      decision: finalDecision,
-      riskScore: parsed.riskScore,
-      triggeredPolicies: parsed.triggeredPolicies || [],
-      consentVersion,
-      consentPurpose,
-    },
-  });
-} catch (dpdpObsError) {
-  console.error(
-    "DPDP observability logging failed:",
-    dpdpObsError.message
-  );
-}
+    prompt: maskSensitiveData(prompt),
 
-    res.json({
-      id: savedLog._id,
-      prompt: savedLog.prompt,
-      rawOutput: savedLog.rawOutput,
-      finalOutput: savedLog.finalOutput,
-      decision: savedLog.decision,
-      riskScore: savedLog.riskScore,
-      mode: savedLog.mode,
-      primaryModel: finalModel,
-      validatorModel: savedLog.validatorModel,
-      policies: savedLog.policies || [],
-      triggeredPolicies: savedLog.triggeredPolicies || [],
-      consentAccepted: savedLog.consentAccepted,
-      consentVersion: savedLog.consentVersion,
-      consentPurpose: savedLog.consentPurpose,
-      timeline: savedLog.timeline || [],
-      createdAt: savedLog.createdAt,
-      evidenceResults,
-      provider: "",
-      claims: savedLog.claims || [],
-    });
-  } catch (err) {
-  console.error(err);
-
-  let friendlyMessage = "Something went wrong";
-
-  // Anthropic insufficient credits
-  if (
-    err?.error?.error?.message?.includes("credit balance is too low")
-  ) {
-    friendlyMessage =
-      "Not enough Claude credits. Please upgrade or add billing credits.";
-  }
-
-  // OpenAI quota exceeded
-  else if (
-    err?.message?.includes("quota") ||
-    err?.message?.includes("insufficient_quota")
-  ) {
-    friendlyMessage =
-      "OpenAI quota exceeded. Please check billing.";
-  }
-
-  // Invalid API key
-  else if (
-    err?.message?.toLowerCase().includes("api key")
-  ) {
-    friendlyMessage =
-      "Invalid API key for selected AI provider.";
-  }
-
-try {
-  await createDpdpObservabilityEvent({
-    prompt: req.body.prompt || "",
     response: "",
-    modelName: finalModel || "unknown-model",
+
+    modelName: finalModel,
+
     userId: req.user?.id || "anonymous",
-    consentStatus: req.body.consentAccepted
+
+    consentStatus: consentAccepted
       ? "VALID"
       : "MISSING",
-    source: "AI_CHAT_ERROR",
+
+    source: "CROSS_BORDER_TRANSFER",
+
     metadata: {
-      provider,
-      error: err.message,
-      errorType: "AI_PROVIDER_FAILURE",
+      provider: transferResult.provider,
+
+      destinationCountry:
+        transferResult.destinationCountry,
+
+      restricted:
+        transferResult.restricted,
+
+      transferDetected:
+        transferResult.transferDetected,
+
+      recommendation:
+        transferResult.recommendation,
     },
   });
-} catch (obsErr) {
+} catch (transferErr) {
   console.error(
-    "Failed to create DPDP error observability event:",
-    obsErr.message
+    "Cross-border observability failed:",
+    transferErr.message
   );
 }
-  res.status(500).json({
-  error: friendlyMessage,
-  details: err.message,
-  provider: provider || "UNKNOWN",
-  primaryModel: finalModel || "unknown-model",
-});
+
+try {
+  if (childProtectionResult.childDataDetected) {
+    await createDpdpObservabilityEvent({
+      eventType: "DATA_SECURITY_EVENT",
+      prompt: maskSensitiveData(prompt),
+      response: "",
+      modelName: finalModel,
+      userId: req.user?.id || "anonymous",
+      consentStatus: consentAccepted ? "VALID" : "MISSING",
+      source: "CHILD_DATA_PROCESSING",
+      metadata: {
+        childDataDetected: childProtectionResult.childDataDetected,
+        parentalConsentRequired:
+          childProtectionResult.parentalConsentRequired,
+        recommendation: childProtectionResult.recommendation,
+      },
+    });
+  }
+} catch (childErr) {
+  console.error(
+    "Child data observability failed:",
+    childErr.message
+  );
 }
 
+      res.json({
+        id: savedLog._id,
+        prompt: savedLog.prompt,
+        rawOutput: savedLog.rawOutput,
+        finalOutput: savedLog.finalOutput,
+        decision: savedLog.decision,
+        riskScore: savedLog.riskScore,
+        mode: savedLog.mode,
+        primaryModel: finalModel,
+        validatorModel: savedLog.validatorModel,
+        policies: savedLog.policies || [],
+        triggeredPolicies: savedLog.triggeredPolicies || [],
+        consentAccepted: savedLog.consentAccepted,
+        consentVersion: savedLog.consentVersion,
+        consentPurpose: savedLog.consentPurpose,
+        timeline: savedLog.timeline || [],
+        createdAt: savedLog.createdAt,
+        evidenceResults,
+        provider,
+        claims: savedLog.claims || [],
+      });
+    } catch (err) {
+      console.error(err);
+
+      let friendlyMessage = "Something went wrong";
+
+      if (
+        err?.error?.error?.message?.includes(
+          "credit balance is too low"
+        )
+      ) {
+        friendlyMessage =
+          "Not enough Claude credits. Please upgrade or add billing credits.";
+      } else if (
+        err?.message?.includes("quota") ||
+        err?.message?.includes("insufficient_quota")
+      ) {
+        friendlyMessage =
+          "OpenAI quota exceeded. Please check billing.";
+      } else if (
+        err?.message?.toLowerCase().includes("api key")
+      ) {
+        friendlyMessage =
+          "Invalid API key for selected AI provider.";
+      } else if (
+        err?.message?.toLowerCase().includes("gemini")
+      ) {
+        friendlyMessage =
+          "Gemini request failed. Please check Gemini API key and model.";
+      }
+
+      try {
+        await createDpdpObservabilityEvent({
+          prompt: req.body.prompt || "",
+          response: "",
+          modelName: finalModel || "unknown-model",
+          userId: req.user?.id || "anonymous",
+          consentStatus: req.body.consentAccepted
+            ? "VALID"
+            : "MISSING",
+          source: "AI_CHAT_ERROR",
+          metadata: {
+            provider,
+            error: err.message,
+            errorType: "AI_PROVIDER_FAILURE",
+          },
+        });
+      } catch (obsErr) {
+        console.error(
+          "Failed to create DPDP error observability event:",
+          obsErr.message
+        );
+      }
+
+      res.status(500).json({
+        error: friendlyMessage,
+        details: err.message,
+        provider: provider || "UNKNOWN",
+        primaryModel: finalModel || "unknown-model",
+      });
+    }
   });
 
   return router;

@@ -17,6 +17,10 @@ import dpdpObservabilityRoutes from "./routes/dpdpObservability.routes.js";
 import dataPrincipalRightsRoutes from "./routes/dataPrincipalRights.routes.js";
 import retentionPolicyRoutes from "./routes/retentionPolicy.routes.js";
 import breachIncidentRoutes from "./routes/breachIncident.routes.js";
+import dpdpComplianceRoutes from "./routes/dpdpCompliance.routes.js";
+import privacyNoticeRoutes from "./routes/privacyNotice.routes.js";
+import vendorProcessorRoutes from "./routes/vendorProcessor.routes.js";
+import dpoRoutes from "./routes/dpo.routes.js";
 
 dotenv.config({ path: ".env", override: true });
 
@@ -84,6 +88,10 @@ app.use("/api/dpdp-observability", dpdpObservabilityRoutes);
 app.use("/api/data-principal-rights", dataPrincipalRightsRoutes);
 app.use("/api/retention-policies", retentionPolicyRoutes);
 app.use("/api/breach-incidents", breachIncidentRoutes);
+app.use("/api/dpdp-compliance", dpdpComplianceRoutes);
+app.use("/api/privacy-notices", privacyNoticeRoutes);
+app.use("/api/vendor-processors", vendorProcessorRoutes);
+app.use("/api/dpo", dpoRoutes);
 
 mongoose
   .connect(process.env.MONGODB_URI)

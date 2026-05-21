@@ -24,6 +24,13 @@ const dpdpObservabilityEventSchema = new mongoose.Schema(
 
     source: {
       type: String,
+      enum: [
+        "AI_CHAT",
+        "AI_CHAT_ERROR",
+        "DATA_MINIMIZATION",
+        "CHILD_DATA_PROCESSING",
+        "CROSS_BORDER_TRANSFER",
+      ],
       default: "AI_CHAT",
     },
 
@@ -54,7 +61,13 @@ const dpdpObservabilityEventSchema = new mongoose.Schema(
 
     consentStatus: {
       type: String,
-      enum: ["VALID", "MISSING", "WITHDRAWN", "EXPIRED", "UNKNOWN"],
+      enum: [
+        "VALID",
+        "MISSING",
+        "WITHDRAWN",
+        "EXPIRED",
+        "UNKNOWN",
+      ],
       default: "UNKNOWN",
     },
 
@@ -65,7 +78,12 @@ const dpdpObservabilityEventSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["OPEN", "UNDER_REVIEW", "RESOLVED", "FALSE_POSITIVE"],
+      enum: [
+        "OPEN",
+        "UNDER_REVIEW",
+        "RESOLVED",
+        "FALSE_POSITIVE",
+      ],
       default: "OPEN",
     },
 

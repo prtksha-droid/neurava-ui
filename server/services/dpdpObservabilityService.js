@@ -1,4 +1,5 @@
 import DpdpObservabilityEvent from "../models/DpdpObservabilityEvent.js";
+import { maskSensitiveData } from "./dataMasking.service.js";
 
 export function detectPII(text = "") {
   const detected = [];
@@ -18,7 +19,12 @@ export function detectPII(text = "") {
   return detected;
 }
 
-export function calculateDpdpRiskScore({ detectedDataTypes = [], consentStatus }) {
+export function calculateDpdpRiskScore({
+  detectedDataTypes = [],
+  consentStatus,
+  source = "AI_CHAT",
+  metadata = {},
+}) {
   let score = 0;
 
   score += detectedDataTypes.length * 15;
@@ -31,6 +37,14 @@ export function calculateDpdpRiskScore({ detectedDataTypes = [], consentStatus }
   if (consentStatus === "WITHDRAWN") score += 40;
   if (consentStatus === "EXPIRED") score += 25;
 
+  if (source === "DATA_MINIMIZATION") {
+    score = Math.max(score, metadata?.riskScore || 40);
+  }
+
+  if (source === "CROSS_BORDER_TRANSFER") {
+    score = metadata?.restricted ? 75 : 20;
+  }
+
   return Math.min(score, 100);
 }
 
@@ -42,6 +56,7 @@ export function getSeverity(score) {
 }
 
 export async function createDpdpObservabilityEvent({
+  eventType = "",
   prompt = "",
   response = "",
   modelName = "Unknown",
@@ -54,30 +69,52 @@ export async function createDpdpObservabilityEvent({
   const responsePII = detectPII(response);
   const detectedDataTypes = [...new Set([...promptPII, ...responsePII])];
 
-  if (detectedDataTypes.length === 0 && consentStatus === "VALID") {
+  const shouldAlwaysLog =
+    source === "DATA_MINIMIZATION" ||
+    source === "CROSS_BORDER_TRANSFER" ||
+    source === "AI_CHAT_ERROR" ||
+    source === "CHILD_DATA_PROCESSING" ||
+    eventType;
+
+  if (
+    !shouldAlwaysLog &&
+    detectedDataTypes.length === 0 &&
+    consentStatus === "VALID"
+  ) {
     return null;
   }
 
   const riskScore = calculateDpdpRiskScore({
     detectedDataTypes,
     consentStatus,
+    source,
+    metadata,
   });
 
-  let eventType = "DATA_SECURITY_EVENT";
+  let finalEventType = eventType || "DATA_SECURITY_EVENT";
 
-  if (detectedDataTypes.length > 0) eventType = "PII_DETECTED";
-  if (["MISSING", "WITHDRAWN", "EXPIRED"].includes(consentStatus)) {
-    eventType = "CONSENT_VIOLATION";
+  if (!eventType) {
+    if (source === "DATA_MINIMIZATION") {
+      finalEventType = "DATA_SECURITY_EVENT";
+    } else if (source === "CROSS_BORDER_TRANSFER") {
+      finalEventType = "DATA_SECURITY_EVENT";
+    } else if (detectedDataTypes.length > 0) {
+      finalEventType = "PII_DETECTED";
+    } else if (
+      ["MISSING", "WITHDRAWN", "EXPIRED"].includes(consentStatus)
+    ) {
+      finalEventType = "CONSENT_VIOLATION";
+    }
   }
 
   return await DpdpObservabilityEvent.create({
-    eventType,
+    eventType: finalEventType,
     severity: getSeverity(riskScore),
     source,
     modelName,
     userId,
-    promptSnippet: prompt.slice(0, 250),
-    responseSnippet: response.slice(0, 250),
+    promptSnippet: maskSensitiveData(prompt?.slice(0, 300) || ""),
+    responseSnippet: maskSensitiveData(response?.slice(0, 300) || ""),
     detectedDataTypes,
     consentStatus,
     riskScore,

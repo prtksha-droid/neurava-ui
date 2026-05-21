@@ -21,6 +21,9 @@ import WorkflowStudio from "./modules/workflows/WorkflowStudio";
 import DataSubjectRights from "./modules/dpdp/DataSubjectRights";
 import RetentionPolicies from "./modules/dpdp/RetentionPolicies";
 import BreachManagement from "./modules/dpdp/BreachManagement";
+import PrivacyNotices from "./modules/dpdp/PrivacyNotices";
+import VendorProcessors from "./modules/dpdp/VendorProcessors";
+import DpoWorkspace from "./modules/dpdp/DpoWorkspace";
 
 function App() {
   const [active, setActive] = useState("chat");
@@ -74,6 +77,17 @@ function App() {
 
   const isAdmin = user?.role === "ADMIN";
 
+  const renderHomeDashboard = () => (
+    <HomeDashboard
+      active={active}
+      setActive={setActive}
+      user={user}
+      logs={logs}
+      policies={policies}
+      logout={logout}
+    />
+  );
+
   useEffect(() => {
     localStorage.setItem("neuravaPolicies", JSON.stringify(policies));
   }, [policies]);
@@ -90,14 +104,19 @@ function App() {
         });
 
         const data = await res.json();
+
         const activeLlms = Array.isArray(data)
           ? data.filter((item) => item.isActive)
           : [];
 
         setLlms(activeLlms);
 
-        if (activeLlms.length > 0 && !selectedLlmId) {
-          setSelectedLlmId(activeLlms[0].id);
+        const openAiProvider = activeLlms.find(
+          (item) => item.provider === "OPENAI"
+        );
+
+        if (openAiProvider && !selectedLlmId) {
+          setSelectedLlmId(openAiProvider.id);
         }
       } catch (err) {
         console.error("Failed to fetch AI systems", err);
@@ -291,16 +310,7 @@ function App() {
   const renderActiveModule = () => {
     switch (active) {
       case "dashboard":
-        return (
-          <HomeDashboard
-            active={active}
-            setActive={setActive}
-            user={user}
-            logs={logs}
-            policies={policies}
-            logout={logout}
-          />
-        );
+        return renderHomeDashboard();
 
       case "control-tower":
         return (
@@ -328,14 +338,7 @@ function App() {
             logout={logout}
           />
         ) : (
-          <HomeDashboard
-            active={active}
-            setActive={setActive}
-            user={user}
-            logs={logs}
-            policies={policies}
-            logout={logout}
-          />
+          renderHomeDashboard()
         );
 
       case "observability":
@@ -381,14 +384,7 @@ function App() {
             logout={logout}
           />
         ) : (
-          <HomeDashboard
-            active={active}
-            setActive={setActive}
-            user={user}
-            logs={logs}
-            policies={policies}
-            logout={logout}
-          />
+          renderHomeDashboard()
         );
 
       case "users":
@@ -401,14 +397,7 @@ function App() {
             logout={logout}
           />
         ) : (
-          <HomeDashboard
-            active={active}
-            setActive={setActive}
-            user={user}
-            logs={logs}
-            policies={policies}
-            logout={logout}
-          />
+          renderHomeDashboard()
         );
 
       case "ai-systems":
@@ -421,14 +410,7 @@ function App() {
             logout={logout}
           />
         ) : (
-          <HomeDashboard
-            active={active}
-            setActive={setActive}
-            user={user}
-            logs={logs}
-            policies={policies}
-            logout={logout}
-          />
+          renderHomeDashboard()
         );
 
       case "attack-lab":
@@ -485,43 +467,86 @@ function App() {
             logout={logout}
           />
         );
-        case "data-subject-rights":
-  return (
-    <DataSubjectRights
+
+      case "data-subject-rights":
+        return isAdmin ? (
+          <DataSubjectRights
+            active={active}
+            setActive={setActive}
+            user={user}
+            logout={logout}
+          />
+        ) : (
+          renderHomeDashboard()
+        );
+
+      case "retention-policies":
+        return isAdmin ? (
+          <RetentionPolicies
+            active={active}
+            setActive={setActive}
+            user={user}
+            logout={logout}
+          />
+        ) : (
+          renderHomeDashboard()
+        );
+
+      case "breach-management":
+        return isAdmin ? (
+          <BreachManagement
+            active={active}
+            setActive={setActive}
+            user={user}
+            logout={logout}
+          />
+        ) : (
+          renderHomeDashboard()
+        );
+
+      case "privacy-notices":
+        return isAdmin ? (
+          <PrivacyNotices
+            active={active}
+            setActive={setActive}
+            user={user}
+            logout={logout}
+          />
+        ) : (
+          renderHomeDashboard()
+        );
+        case "vendor-processors":
+  return isAdmin ? (
+    <VendorProcessors
       active={active}
       setActive={setActive}
       user={user}
       logout={logout}
     />
+  ) : (
+    renderHomeDashboard()
   );
-  case "retention-policies":
-  return (
-    <RetentionPolicies
+  case "dpo-workspace":
+  return isAdmin ? (
+    <DpoWorkspace
       active={active}
       setActive={setActive}
       user={user}
       logout={logout}
     />
-  );
-  case "breach-management":
-  return (
-    <BreachManagement
-      active={active}
-      setActive={setActive}
-      user={user}
-      logout={logout}
-    />
+  ) : (
+    renderHomeDashboard()
   );
       case "workflows":
-  return (
-    <WorkflowStudio
-      active={active}
-      setActive={setActive}
-      user={user}
-      logout={logout}
-      token={token}
-    />
-  );
+        return (
+          <WorkflowStudio
+            active={active}
+            setActive={setActive}
+            user={user}
+            logout={logout}
+            token={token}
+          />
+        );
 
       case "chat":
       default:
