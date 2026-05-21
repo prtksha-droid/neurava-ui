@@ -15,14 +15,20 @@ export default function LoginPage({ onLoginSuccess }) {
     setError("");
 
     try {
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://neurava-backend-fw32.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/api/auth/login`), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
+        const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  "https://neurava-backend-fw32.onrender.com";
+
+const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    email,
+    password,
+  }),
+});
 
       const data = await res.json();
 
@@ -223,7 +229,7 @@ export default function LoginPage({ onLoginSuccess }) {
                   onSuccess={async (credentialResponse) => {
                     try {
                       const res = await fetch(
-                        "http://localhost:5000/api/auth/google",
+  `${API_BASE_URL}/api/auth/google`,
                         {
                           method: "POST",
                           headers: {
